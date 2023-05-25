@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>GAME</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+</head>
+
+<body>
+    <div class="canvas_div">
+        <canvas height="600px" , width="900px" , id="canvas" style="border:1px solid #000000;"></canvas>
+    </div>
+    <a href="/">HOME</a>
+</body>
+<script>
+    let clientId = ""
+    let clientnow = {
+        W: false,
+        S: false,
+        D: false,
+        A: false,
+    }
+    let clientlate = {
+        W: false,
+        S: false,
+        D: false,
+        A: false,
+    }
+    const cube = {}
+    const DEBUG_COORDS = [{ }]
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    let socket = new WebSocket(`ws://127.0.0.1:8000/ws`);
+    console.log("Attempting Connection...");
+    socket.onopen = () => {
+        console.log("Successfully Connected");
+    };
+
+    socket.onmessage = (event) => {
+        let message = JSON.parse(event.data)
+        switch (message.Status) {
+            case "test":
+                console.log(message)
+                break
+            case "id":
+                sessionStorage.setItem("id", message.Text)
+                clientId = message.Text
+                const msg = {
+                    Status: "status",
+                    Text: "connected",
+                    Id: sessionStorage.getItem("id")
+                }
+                socket.send(JSON.stringify(msg))
+                console.log("CONNECTED", cube)
+                break
+            case "coords":
+                if (!(message.Id in cube)) {
+                    cube[message.Id] = {
+                        x: 0,
+                        y: 0,
+                        X_s: 0,
+                        Y_s: 0,
+                        color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
+                    };
+                };
+                [cube[message.Id].x, cube[message.Id].y] = [message.X, message.Y];
+                break
+            case "move":
+                [cube[message.Id].X_s, cube[message.Id].Y_s] = [message.X_s, message.Y_s];
+                break
+            case "playerLeft":
+                console.log("DELETE PLAYER")
+                delete cube[message.Id]
+        }
+    }
+
+    socket.onclose = event => {
+        console.log("Socket Closed Connection: ", event.wasClean);
+        window.location.replace("http://127.0.0.1:8000/")
+    }
+
+    socket.onerror = error => {
+        console.log("Socket Error: ", error);
+    };
+
+    function draw_rectangle() {
+        ctx.fillStyle = "white"
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+        for (const c in cube) {
+            ctx.fillStyle = cube[c].color
+            ctx.fillRect(cube[c].x, cube[c].y, 20, 20);
+        }
+    }
+
+    function getRandomInt(max) {
+        return Math.floor(Math.random() * max);
+    }   
+
+    function phys() {
+        if (JSON.stringify(clientnow) != JSON.stringify(clientlate)) {
+            cube[clientId].X_s = 0
+            cube[clientId].Y_s = 0
+            if (clientnow["W"]) {
+                cube[clientId].Y_s = cube[clientId].Y_s-0.2
+            }
+            if (clientnow["S"]) {
+                cube[clientId].Y_s = cube[clientId].Y_s+0.2
+            }
+            if (clientnow["A"]) {
+                cube[clientId].X_s = cube[clientId].X_s-0.2
+            }
+            if (clientnow["D"]) {
+                cube[clientId].X_s =cube[clientId].X_s+0.2
+            }
+            const message = {
+                Status: "move",
+                Id: clientId,
+                X_s: cube[clientId].X_s,
+                Y_s: cube[clientId].Y_s
+            }
+
+            socket.send(JSON.stringify(message))
+            clientlate = Object.assign({}, clientnow)
+        }
+
+        setTimeout(phys, 20)
+    }
+    window.addEventListener("keydown", logKey);
+    function logKey(e) {
+        clientnow[e.code[3]] = true
+    }
+    window.addEventListener("keyup", unlogKey);
+    function unlogKey(e) {
+        clientnow[e.code[3]] = false
+    }
+    let lastT = undefined;
+    function draw_frame(t) {
+        if (lastT === undefined) { lastT = t; }
+        const dt = t - lastT;
+        for (const key in cube) {
+            const x_c = cube[key].x + cube[key].X_s * dt
+            const y_c =  cube[key].y + cube[key].Y_s * dt
+            cube[key].x = x_c;
+            cube[key].y = y_c;
+        }
+        lastT = t;
+        draw_rectangle();
+
+        // for (const debug of DEBUG_COORDS) {
+        //     if (debug.x !== undefined) {
+        //         ctx.fillStyle = 'magenta';
+        //         ctx.fillRect(debug.x-10, debug.y-10, 20, 20);
+        //     }
+
+
+        requestAnimationFrame(draw_frame);
+    }
+    requestAnimationFrame(draw_frame);
+    setTimeout(phys, 20)
+</script>
+
+
+</html>

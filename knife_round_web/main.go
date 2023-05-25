@@ -76,11 +76,16 @@ func (r *Room) Handle() {
 			for _, p := range r.players { //i cho
 				x_c := p.X+p.X_s*dt 
 				y_c := p.Y+p.Y_s*dt
-				if x_c >=0 && x_c+20 <= FieldWidth{
-					p.X = x_c
+				p.X, p.Y = x_c, y_c
+				if x_c < 0{
+					p.X = -x_c
+				} else if x_c + 20>FieldWidth{
+					p.X = x_c - 20 - (x_c - FieldWidth)
 				}
-				if y_c >= 0 && y_c+20 <= FieldHeight{
-					p.Y = y_c
+				if (y_c+20 > FieldHeight) {
+					p.Y = y_c - 20 - (y_c - FieldHeight)
+				} else if (y_c<0){
+					p.Y = -y_c
 				}
 				//p.X, p.Y = p.X+p.X_s*dt, p.Y+p.Y_s*dt
 				if p.SpeedUpdated{

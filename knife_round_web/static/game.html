@@ -29,7 +29,7 @@
         A: false,
     }
     const cube = {}
-    const DEBUG_COORDS = [{ }]
+    const DEBUG_COORDS = [{}]
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
@@ -98,23 +98,23 @@
 
     function getRandomInt(max) {
         return Math.floor(Math.random() * max);
-    }   
+    }
 
     function phys() {
         if (JSON.stringify(clientnow) != JSON.stringify(clientlate)) {
             cube[clientId].X_s = 0
             cube[clientId].Y_s = 0
             if (clientnow["W"]) {
-                cube[clientId].Y_s = cube[clientId].Y_s-0.2
+                cube[clientId].Y_s = cube[clientId].Y_s - 0.2
             }
             if (clientnow["S"]) {
-                cube[clientId].Y_s = cube[clientId].Y_s+0.2
+                cube[clientId].Y_s = cube[clientId].Y_s + 0.2
             }
             if (clientnow["A"]) {
-                cube[clientId].X_s = cube[clientId].X_s-0.2
+                cube[clientId].X_s = cube[clientId].X_s - 0.2
             }
             if (clientnow["D"]) {
-                cube[clientId].X_s =cube[clientId].X_s+0.2
+                cube[clientId].X_s = cube[clientId].X_s + 0.2
             }
             const message = {
                 Status: "move",
@@ -126,8 +126,24 @@
             socket.send(JSON.stringify(message))
             clientlate = Object.assign({}, clientnow)
         }
+        for (const key in cube) {
+            const x_c = cube[key].x + cube[key].X_s * 16
+            const y_c = cube[key].y + cube[key].Y_s * 16
+            cube[key].x = x_c
+            cube[key].y = y_c;
+            if (x_c < 0) {
+                cube[key].x =  - x_c
+            } else if (x_c + 20 > canvas.clientWidth) {
+                cube[key].x = x_c - 20 - (x_c - canvas.clientWidth)
+            }
+            if (y_c+20 > canvas.clientHeight) {
+                cube[key].y = y_c -20 - (y_c - canvas.clientHeight)
+            } else if (y_c<0){
+                cube[key].y = -y_c
+            }
+        }
 
-        setTimeout(phys, 20)
+        setTimeout(phys, 16)
     }
     window.addEventListener("keydown", logKey);
     function logKey(e) {
@@ -141,15 +157,14 @@
     function draw_frame(t) {
         if (lastT === undefined) { lastT = t; }
         const dt = t - lastT;
-        for (const key in cube) {
-            const x_c = cube[key].x + cube[key].X_s * dt
-            const y_c =  cube[key].y + cube[key].Y_s * dt
-            cube[key].x = x_c;
-            cube[key].y = y_c;
-        }
         lastT = t;
         draw_rectangle();
-
+        // for (const key in cube) {
+        //         const x_c = cube[key].x + cube[key].X_s * 16
+        //         const y_c = cube[key].y + cube[key].Y_s * 16
+        //         cube[key].x = x_c
+        //         cube[key].y = y_c;
+        // }
         // for (const debug of DEBUG_COORDS) {
         //     if (debug.x !== undefined) {
         //         ctx.fillStyle = 'magenta';

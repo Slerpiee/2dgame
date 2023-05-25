@@ -35,6 +35,7 @@ type Player struct {
 	Y            float64
 	X_s          float64
 	Y_s          float64
+	// dodge time if time since last dodge, if time > kd - do dodge
 	SpeedUpdated bool
 }
 

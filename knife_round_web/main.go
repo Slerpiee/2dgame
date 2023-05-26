@@ -171,16 +171,6 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 	mainRoom.Unlock()
 	conn.WriteJSON(OUTmessage{Status: "id", Text: id.String(), X: 600 / 2, Y: 600 / 2})
 
-	for _, pl := range mainRoom.players {
-		for _, p := range mainRoom.players {
-			pl.Conn.WriteJSON(OUTmessage{
-				Status: "player_join",
-				X:      p.X,
-				Y:      p.Y,
-				Id:     p.Id,
-			})
-		}
-	}
 	for {
 		var message INmessage
 		err := conn.ReadJSON(&message)

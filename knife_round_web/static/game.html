@@ -11,9 +11,9 @@
 <body>
     <div class="canvas_div">
         <canvas height="600px" , width="900px" , id="canvas" style="border:1px solid #000000;"></canvas>
-        <a href="/">HOME</a>
+        <div id="players" style="display:inline-block;"></div>
     </div>
-    <div id="players"></div>
+    <a href="/">HOME</a>
 </body>
 <script>
     let clientId = ""
@@ -80,15 +80,13 @@
                             Y_s: element.Y_s,
                             color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
                         };
+                        let p = document.createElement("p");
+                        p.setAttribute("player_id", element.Id)
+                        p.style.color = cube[element.Id].color
+                        p.textContent = cube[element.Id].name
+                        players.appendChild(p)
                     };
                 });
-                // cube[message.Id].name = message.Name
-                // let p = document.createElement("p");
-                // p.style = {
-                //     color: cube[message.Id].color
-                // }
-                // p.textContent = cube[message.Id].name
-                // players.appendChild(p)
                 break
             case "playerLeft":
                 console.log("DELETE PLAYER")

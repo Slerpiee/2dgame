@@ -11,8 +11,9 @@
 <body>
     <div class="canvas_div">
         <canvas height="600px" , width="900px" , id="canvas" style="border:1px solid #000000;"></canvas>
+        <a href="/">HOME</a>
     </div>
-    <a href="/">HOME</a>
+    <div id="players"></div>
 </body>
 <script>
     let clientId = ""
@@ -29,10 +30,11 @@
         A: false,
     }
     const cube = {}
-    const DEBUG_COORDS = [{}]
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const players = document.getElementById("players")
+
 
     let socket = new WebSocket(`ws://127.0.0.1:8000/ws`);
     console.log("Attempting Connection...");
@@ -50,27 +52,43 @@
                 sessionStorage.setItem("id", message.Text)
                 clientId = message.Text
                 const msg = {
-                    Status: "status",
+                    Status: "connected",
                     Text: "connected",
-                    Id: sessionStorage.getItem("id")
+                    Id: sessionStorage.getItem("id"),
+                    Name: sessionStorage.getItem("name")
                 }
                 socket.send(JSON.stringify(msg))
-                console.log("CONNECTED", cube)
                 break
             case "coords":
                 if (!(message.Id in cube)) {
-                    cube[message.Id] = {
-                        x: 0,
-                        y: 0,
-                        X_s: 0,
-                        Y_s: 0,
-                        color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
-                    };
+                    console.log("no such player")
+                    break
                 };
                 [cube[message.Id].x, cube[message.Id].y] = [message.X, message.Y];
                 break
             case "move":
                 [cube[message.Id].X_s, cube[message.Id].Y_s] = [message.X_s, message.Y_s];
+                break
+            case "room_data":
+                message.Players.forEach(element => {
+                    if (!(element.Id in cube)) {
+                        cube[element.Id] = {
+                            name: element.Name,
+                            x: element.X,
+                            y: element.Y,
+                            X_s: element.X_s,
+                            Y_s: element.Y_s,
+                            color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
+                        };
+                    };
+                });
+                // cube[message.Id].name = message.Name
+                // let p = document.createElement("p");
+                // p.style = {
+                //     color: cube[message.Id].color
+                // }
+                // p.textContent = cube[message.Id].name
+                // players.appendChild(p)
                 break
             case "playerLeft":
                 console.log("DELETE PLAYER")
@@ -132,13 +150,13 @@
             cube[key].x = x_c
             cube[key].y = y_c;
             if (x_c < 0) {
-                cube[key].x =  - x_c
+                cube[key].x = - x_c
             } else if (x_c + 20 > canvas.clientWidth) {
                 cube[key].x = x_c - 20 - (x_c - canvas.clientWidth)
             }
-            if (y_c+20 > canvas.clientHeight) {
-                cube[key].y = y_c -20 - (y_c - canvas.clientHeight)
-            } else if (y_c<0){
+            if (y_c + 20 > canvas.clientHeight) {
+                cube[key].y = y_c - 20 - (y_c - canvas.clientHeight)
+            } else if (y_c < 0) {
                 cube[key].y = -y_c
             }
         }

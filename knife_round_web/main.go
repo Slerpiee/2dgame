@@ -31,6 +31,7 @@ func (r *Room) Send(message OUTmessage) {
 type Player struct {
 	Id           string
 	Conn         *websocket.Conn
+	Name string
 	X            float64
 	Y            float64
 	X_s          float64
@@ -42,6 +43,7 @@ type Player struct {
 type INmessage struct {
 	Id     string
 	Status string
+	Name string `json:,omitempty`
 	Text   string `json:,omitempty`
 	X_s    float64    `json:,omitempty`
 	Y_s    float64    `json:,omitempty`
@@ -49,12 +51,14 @@ type INmessage struct {
 
 type OUTmessage struct {
 	Status string
+	Name string  `json:,omitepty`
+	Id     string `json:,omitepty`
 	Text   string `json:,omitempty`
 	X      float64    `json:,omitempty`
 	Y      float64    `json:,omitempty`
 	X_s    float64    `json:,omitempty`
 	Y_s    float64   `json:,omitempty`
-	Id     string `json:,omitepty`
+	Players []OUTmessage `json:,omitempty`
 }
 
 func (r *Room) Handle() {
@@ -65,16 +69,40 @@ func (r *Room) Handle() {
 		select {
 		case message := <-r.in_chan:
 			fmt.Println("Message:", message)
+			if _, ok := r.players[message.Id]; !ok{
+				fmt.Println("invalid id, request skipped")
+				continue
+			}
 			switch message.Status {
 			case "move":
 				r.players[message.Id].X_s, r.players[message.Id].Y_s = message.X_s, message.Y_s
 				r.players[message.Id].SpeedUpdated = true
+			case "connected":
+				fmt.Println("User", message.Name, "connected")
+				mainRoom.players[message.Id].Name = message.Name
+				player_list := []OUTmessage{}
+				for _, p := range r.players{
+					player_list = append(player_list, OUTmessage{
+						Id: p.Id,
+						Name: p.Name,
+						X_s: p.X_s,
+						Y_s: p.Y_s,
+						X: p.X,
+						Y: p.Y,
+
+					})
+				}
+				r.Send(OUTmessage{
+					Status: "room_data",
+					Players: player_list,
+				})
+				
 			}
 		case <-speed_ticker.C:
 			time := time.Now()
 			dt := float64( time.Sub(prevTime).Milliseconds() )
 			prevTime = time
-			for _, p := range r.players { //i cho
+			for _, p := range r.players { 
 				x_c := p.X+p.X_s*dt 
 				y_c := p.Y+p.Y_s*dt
 				p.X, p.Y = x_c, y_c
@@ -107,7 +135,7 @@ func (r *Room) Handle() {
 					Id: p.Id,
 					X: p.X,
 					Y: p.Y,
-				})
+					Name: p.Name,	})
 			}
 		case <-r.terminate:
 			r.players = map[string]*Player{}
@@ -146,7 +174,7 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 	for _, pl := range mainRoom.players {
 		for _, p := range mainRoom.players {
 			pl.Conn.WriteJSON(OUTmessage{
-				Status: "coords",
+				Status: "player_join",
 				X:      p.X,
 				Y:      p.Y,
 				Id:     p.Id,
@@ -171,6 +199,12 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 			}
 			mainRoom.Unlock()
 			break
+		}
+		for _, p := range mainRoom.players{
+			if p.Conn == conn{
+				message.Id = p.Id
+				break
+			}
 		}
 		mainRoom.in_chan <- message
 	}

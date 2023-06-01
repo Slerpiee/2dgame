@@ -16,18 +16,20 @@
     <a href="/">HOME</a>
 </body>
 <script>
-    let clientId = ""
+    let canhit = false
     let clientnow = {
         W: false,
         S: false,
         D: false,
         A: false,
+        Hit: false,
     }
     let clientlate = {
         W: false,
         S: false,
         D: false,
         A: false,
+        Hit: false
     }
     const cube = {}
 
@@ -35,11 +37,10 @@
     const ctx = canvas.getContext("2d");
     const players = document.getElementById("players")
 
-
     let socket = new WebSocket(`ws://127.0.0.1:8000/ws`);
     console.log("Attempting Connection...");
     socket.onopen = () => {
-        console.log("Successfully Connected");
+        console.log("Succsess connection")
     };
 
     socket.onmessage = (event) => {
@@ -55,7 +56,8 @@
                     Status: "connected",
                     Text: "connected",
                     Id: sessionStorage.getItem("id"),
-                    Name: sessionStorage.getItem("name")
+                    Name: sessionStorage.getItem("name"),
+                    Room: sessionStorage.getItem("room_id")
                 }
                 socket.send(JSON.stringify(msg))
                 break
@@ -80,11 +82,11 @@
                             Y_s: element.Y_s,
                             color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
                         };
-                        let p = document.createElement("p");
-                        p.setAttribute("player_id", element.Id)
-                        p.style.color = cube[element.Id].color
-                        p.textContent = cube[element.Id].name
-                        players.appendChild(p)
+                        // let p = document.createElement("p");
+                        // p.setAttribute("player_id", element.Id)
+                        // p.style.color = cube[element.Id].color
+                        // p.textContent = cube[element.Id].name
+                        // players.appendChild(p)
                     };
                 });
                 break
@@ -96,11 +98,12 @@
 
     socket.onclose = event => {
         console.log("Socket Closed Connection: ", event.wasClean);
-        window.location.replace("http://127.0.0.1:8000/")
+        window.location.replace("/")
     }
 
     socket.onerror = error => {
         console.log("Socket Error: ", error);
+        
     };
 
     function draw_rectangle() {
@@ -118,6 +121,11 @@
 
     function phys() {
         if (JSON.stringify(clientnow) != JSON.stringify(clientlate)) {
+            const message = {
+                Status: "move",
+                X_s: 0,
+                Y_s: 0
+            }
             cube[clientId].X_s = 0
             cube[clientId].Y_s = 0
             if (clientnow["W"]) {
@@ -132,15 +140,15 @@
             if (clientnow["D"]) {
                 cube[clientId].X_s = cube[clientId].X_s + 0.2
             }
-            const message = {
-                Status: "move",
-                Id: clientId,
-                X_s: cube[clientId].X_s,
-                Y_s: cube[clientId].Y_s
+            if (clientnow.Hit){
+                message.Text = "shoot"
             }
+            message.X_s = cube[clientId].X_s,
+            message.Y_s = cube[clientId].Y_s,
 
             socket.send(JSON.stringify(message))
             clientlate = Object.assign({}, clientnow)
+            clientnow.Hit = false
         }
         for (const key in cube) {
             const x_c = cube[key].x + cube[key].X_s * 16
@@ -148,14 +156,14 @@
             cube[key].x = x_c
             cube[key].y = y_c;
             if (x_c < 0) {
-                cube[key].x = - x_c
+                cube[key].x = x_c - x_c
             } else if (x_c + 20 > canvas.clientWidth) {
                 cube[key].x = x_c - 20 - (x_c - canvas.clientWidth)
             }
             if (y_c + 20 > canvas.clientHeight) {
                 cube[key].y = y_c - 20 - (y_c - canvas.clientHeight)
             } else if (y_c < 0) {
-                cube[key].y = -y_c
+                cube[key].y = y_c - y_c
             }
         }
 
@@ -186,8 +194,6 @@
         //         ctx.fillStyle = 'magenta';
         //         ctx.fillRect(debug.x-10, debug.y-10, 20, 20);
         //     }
-
-
         requestAnimationFrame(draw_frame);
     }
     requestAnimationFrame(draw_frame);

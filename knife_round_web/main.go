@@ -13,6 +13,37 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type Server struct {
+	List map[string]*Room
+	sync.Mutex
+}
+
+func (p *Server) Get(id string) *Room {
+	p.Lock()
+	pl, ok := p.List[id]
+	p.Unlock()
+	if !ok {
+		return nil
+	}
+	return pl
+
+}
+
+func (p *Server) Delete(id string) {
+	p.Lock()
+	delete(p.List, id)
+	p.Unlock()
+
+}
+
+func (p *Server) Add(r *Room) {
+	p.Lock()
+	p.List[r.id] = r
+	p.Unlock()
+
+}
+
+
 type Room struct {
 	id        string
 	players   map[string]*Player
@@ -21,121 +52,176 @@ type Room struct {
 	sync.Mutex
 }
 
+func RoomInit(id string) *Room{
+	room := &Room{
+		id: id,
+		in_chan: make(chan INmessage),
+		terminate: make(chan struct{}),
+		players: make(map[string]*Player),
+	}
+	return room
+}
+
 func (r *Room) Send(message OUTmessage) {
 	for _, p := range r.players {
 		p.Conn.WriteJSON(message)
 	}
 }
 
+var Users Players
+
+type Players struct {
+	List map[string]*Player
+	sync.Mutex
+}
+
+func (p *Players) Get(id string) *Player {
+	p.Lock()
+	pl, ok := p.List[id]
+	p.Unlock()
+	if !ok {
+		return nil
+	}
+	return pl
+
+}
+
+func (p *Players) Add(pl *Player) {
+	p.Lock()
+	p.List[pl.Id] = pl
+	p.Unlock()
+}
+
+func (p *Players) Delete(id string) {
+	p.Lock()
+
+	delete(p.List, id)
+	p.Unlock()
+}
+
+func (p *Players) Full(id string) map[string]*Player {
+	var l map[string]*Player
+	p.Lock()
+	l = p.List
+	p.Unlock()
+	return l
+}
 
 type Player struct {
-	Id           string
-	Conn         *websocket.Conn
+	Id   string
+	Room string
+	Conn *websocket.Conn
 	Name string
-	X            float64
-	Y            float64
-	X_s          float64
-	Y_s          float64
-	// dodge time if time since last dodge, if time > kd - do dodge
+	X    float64
+	Y    float64
+	X_s  float64
+	Y_s  float64
+	Stats GameStats
 	SpeedUpdated bool
 }
 
+type GameStats struct{
+	Hp int
+	LastHit time.Time
+	Alive bool
+}
+
 type INmessage struct {
-	Id     string
+	Id     string `json:,omitempty`
 	Status string
-	Name string `json:,omitempty`
-	Text   string `json:,omitempty`
-	X_s    float64    `json:,omitempty`
-	Y_s    float64    `json:,omitempty`
+	Room   string  `json:,omitempty`
+	Name   string  `json:,omitempty`
+	Text   string  `json:,omitempty`
+	X_s    float64 `json:,omitempty`
+	Y_s    float64 `json:,omitempty`
 }
 
 type OUTmessage struct {
-	Status string
-	Name string  `json:,omitepty`
-	Id     string `json:,omitepty`
-	Text   string `json:,omitempty`
-	X      float64    `json:,omitempty`
-	Y      float64    `json:,omitempty`
-	X_s    float64    `json:,omitempty`
-	Y_s    float64   `json:,omitempty`
+	Status  string
+	Name    string       `json:,omitepty`
+	Id      string       `json:,omitepty`
+	Text    string       `json:,omitempty`
+	X       float64      `json:,omitempty`
+	Y       float64      `json:,omitempty`
+	X_s     float64      `json:,omitempty`
+	Y_s     float64      `json:,omitempty`
 	Players []OUTmessage `json:,omitempty`
 }
 
 func (r *Room) Handle() {
 	speed_ticker := time.NewTicker(Fps * time.Millisecond)
-	check_ticker := time.NewTicker(300*time.Millisecond)
+	check_ticker := time.NewTicker(300 * time.Millisecond)
 	prevTime := time.Now()
 	for {
 		select {
 		case message := <-r.in_chan:
-			fmt.Println("Message:", message)
-			if _, ok := r.players[message.Id]; !ok{
+			if _, ok := r.players[message.Id]; !ok {
 				fmt.Println("invalid id, request skipped")
 				continue
 			}
 			switch message.Status {
 			case "move":
-				r.players[message.Id].X_s, r.players[message.Id].Y_s = message.X_s, message.Y_s
-				r.players[message.Id].SpeedUpdated = true
+					r.players[message.Id].X_s, r.players[message.Id].Y_s = message.X_s, message.Y_s
+					r.players[message.Id].SpeedUpdated = true
 			case "connected":
-				fmt.Println("User", message.Name, "connected")
-				mainRoom.players[message.Id].Name = message.Name
+				fmt.Println("User:", message.Name)
 				player_list := []OUTmessage{}
-				for _, p := range r.players{
+				for _, p := range r.players {
 					player_list = append(player_list, OUTmessage{
-						Id: p.Id,
+						Id:   p.Id,
 						Name: p.Name,
-						X_s: p.X_s,
-						Y_s: p.Y_s,
-						X: p.X,
-						Y: p.Y,
-
+						X_s:  p.X_s,
+						Y_s:  p.Y_s,
+						X:    p.X,
+						Y:    p.Y,
 					})
 				}
 				r.Send(OUTmessage{
-					Status: "room_data",
+					Status:  "room_data",
 					Players: player_list,
 				})
-				
+
 			}
 		case <-speed_ticker.C:
 			time := time.Now()
-			dt := float64( time.Sub(prevTime).Milliseconds() )
+			dt := float64(time.Sub(prevTime).Milliseconds())
 			prevTime = time
-			for _, p := range r.players { 
-				x_c := p.X+p.X_s*dt 
-				y_c := p.Y+p.Y_s*dt
+			for _, p := range r.players {
+				if !p.Stats.Alive{
+					break
+				}
+				x_c := p.X + p.X_s*dt
+				y_c := p.Y + p.Y_s*dt
 				p.X, p.Y = x_c, y_c
-				if x_c < 0{
-					p.X = -x_c
-				} else if x_c + 20>FieldWidth{
+				if x_c < 0 {
+					p.X = x_c - x_c
+				} else if x_c+20 > FieldWidth {
 					p.X = x_c - 20 - (x_c - FieldWidth)
 				}
-				if (y_c+20 > FieldHeight) {
+				if y_c+20 > FieldHeight {
 					p.Y = y_c - 20 - (y_c - FieldHeight)
-				} else if (y_c<0){
-					p.Y = -y_c
+				} else if y_c < 0 {
+					p.Y = y_c - y_c
 				}
 				//p.X, p.Y = p.X+p.X_s*dt, p.Y+p.Y_s*dt
 				if p.SpeedUpdated{
 					p.SpeedUpdated = false
 					r.Send(OUTmessage{
 						Status: "move",
-						Id: p.Id,
-						X_s: p.X_s,
-						Y_s: p.Y_s,
+						Id:     p.Id,
+						X_s:    p.X_s,
+						Y_s:    p.Y_s,
 					})
 				}
-
 			}
 		case <-check_ticker.C:
-			for _, p := range r.players{
+			for _, p := range r.players {
 				r.Send(OUTmessage{
 					Status: "coords",
-					Id: p.Id,
-					X: p.X,
-					Y: p.Y,
-					Name: p.Name,	})
+					Id:     p.Id,
+					X:      p.X,
+					Y:      p.Y,
+					Name:   p.Name})
 			}
 		case <-r.terminate:
 			r.players = map[string]*Player{}
@@ -147,7 +233,6 @@ func (r *Room) Handle() {
 	}
 }
 
-
 func home(w http.ResponseWriter, r *http.Request) {
 	tmpl := template.Must(template.ParseFiles("./static/index.html"))
 	tmpl.Execute(w, nil)
@@ -158,68 +243,92 @@ func game(w http.ResponseWriter, r *http.Request) {
 	tmpl.Execute(w, nil)
 }
 
+
+func RoomMidleware(m INmessage, pl *Player) bool{
+	switch m.Status{
+	case "move":
+		if pl.Stats.Alive && m.X_s <= 0.2 && m.X_s >= -0.2 && m.Y_s <= 0.2 && m.Y_s >= -0.2{
+			return true
+		}
+		break
+	default:
+		return true
+	}
+	return false
+}
+
+
 func serve_ws(w http.ResponseWriter, r *http.Request) {
+	var player_room *Room
+	var pl *Player
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		fmt.Println("ERROR WHILE CONNECTING:", err)
 		return
 	}
-	id := uuid.New()
-	mainRoom.Lock()
-	mainRoom.players[id.String()] = &Player{Id: id.String(), Conn: conn, X: FieldWidth / 2, Y: FieldHeight / 2}
-	mainRoom.Unlock()
-	conn.WriteJSON(OUTmessage{Status: "id", Text: id.String(), X: 600 / 2, Y: 600 / 2})
+	pl = &Player{Id: uuid.New().String(), Room: "", Conn: conn, X: FieldWidth / 2, Y: FieldHeight / 2, Stats: GameStats{Hp: 3, LastHit: time.Now(), Alive: true}}
+	Users.Add(pl)
+	conn.WriteJSON(OUTmessage{Status: "id", Text: pl.Id, X: 600 / 2, Y: 600 / 2})
 
 	for {
 		var message INmessage
 		err := conn.ReadJSON(&message)
 		if err != nil {
-			fmt.Println("Connection lost", err, message, )
-			mainRoom.Lock()
-			for i, p := range mainRoom.players {
-				if p.Conn == conn {
-					mainRoom.Send(OUTmessage{
-						Status: "playerLeft",
-						Id: p.Id,
-					})
-					delete(mainRoom.players, i)
-					break
-				}
-			}
-			mainRoom.Unlock()
+			fmt.Println("Connection lost", err, message)
+			player_room.Lock()
+			delete(player_room.players, pl.Id)
+			player_room.Unlock()
+			player_room.Send(OUTmessage{
+				Status: "playerLeft",
+				Id:     pl.Id,
+			})
+			Users.Delete(pl.Id)
 			break
 		}
-		for _, p := range mainRoom.players{
-			if p.Conn == conn{
+		if message.Status == "connected" {
+			pl.Name = message.Name
+			pl.Room = message.Room
+			player_room = Rooms.Get(message.Room)
+			if player_room == nil {
+				conn.Close()
+				return
+			}
+			player_room.Lock()
+			player_room.players[pl.Id] = pl
+			player_room.Unlock()
+		}
+		for _, p := range player_room.players {
+			if p.Conn == conn {
 				message.Id = p.Id
 				break
 			}
 		}
-		mainRoom.in_chan <- message
+		//if RoomMidleware(message, pl){    //ПЕРЕПИСАТЬ ВСЕ НАХУЙ, ПЕРЕДАВАТЬ В КАНАЛ ПОЛЬЗОВАТЕЛЯ И СООБЩЕНИЕ А НЕ ТОЛЬКО СООБЩЕНИЕ
+		player_room.in_chan <- message
+		//}
 	}
 }
 
 var r *mux.Router
 var upgrader websocket.Upgrader
-var mainRoom *Room
+var Rooms Server
 
 const (
-	RectSize = 20
-	FieldWidth = 900
+	RectSize    = 20
+	FieldWidth  = 900
 	FieldHeight = 600
-	Fps = 1000/60 //time.Millisecond
-	
+	Fps         = 1000 / 60 //time.Millisecond
+
 )
 
 func init() {
 	r = mux.NewRouter()
-	mainRoom = &Room{}
-	mainRoom.id = uuid.New().String()
-	mainRoom.players = make(map[string]*Player)
-	mainRoom.in_chan = make(chan INmessage)
-	mainRoom.terminate = make(chan struct{})
+	Users.List = make(map[string]*Player)
+	Rooms.List = map[string]*Room{}
+	mainRoom := RoomInit("123")
 	go mainRoom.Handle()
+	Rooms.Add(mainRoom)
 	upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,

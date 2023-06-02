@@ -43,11 +43,15 @@ func (p *Server) Add(r *Room) {
 
 }
 
+type ToChan struct{
+	message INmessage
+	player *Player
+}
 
 type Room struct {
 	id        string
 	players   map[string]*Player
-	in_chan   chan INmessage
+	in_chan   chan ToChan
 	terminate chan struct{}
 	sync.Mutex
 }
@@ -55,7 +59,7 @@ type Room struct {
 func RoomInit(id string) *Room{
 	room := &Room{
 		id: id,
-		in_chan: make(chan INmessage),
+		in_chan: make(chan ToChan),
 		terminate: make(chan struct{}),
 		players: make(map[string]*Player),
 	}
@@ -154,15 +158,26 @@ func (r *Room) Handle() {
 	prevTime := time.Now()
 	for {
 		select {
-		case message := <-r.in_chan:
-			if _, ok := r.players[message.Id]; !ok {
+		case data := <-r.in_chan:
+			message := data.message
+			player := data.player
+			if player.Room != r.id{
 				fmt.Println("invalid id, request skipped")
 				continue
 			}
 			switch message.Status {
 			case "move":
-					r.players[message.Id].X_s, r.players[message.Id].Y_s = message.X_s, message.Y_s
-					r.players[message.Id].SpeedUpdated = true
+					player.X_s, player.Y_s = message.X_s, message.Y_s
+					player.SpeedUpdated = true
+					if message.Text == "hit"{
+						if time.Now().Sub(player.Stats.LastHit).Seconds() >= HitTime.Seconds(){
+							fmt.Println("Hit yes")
+							player.Stats.LastHit = time.Now()
+						} else{
+							fmt.Println("Hit false")
+						}
+
+					}
 			case "connected":
 				fmt.Println("User:", message.Name)
 				player_list := []OUTmessage{}
@@ -180,7 +195,6 @@ func (r *Room) Handle() {
 					Status:  "room_data",
 					Players: player_list,
 				})
-
 			}
 		case <-speed_ticker.C:
 			time := time.Now()
@@ -205,13 +219,14 @@ func (r *Room) Handle() {
 				}
 				//p.X, p.Y = p.X+p.X_s*dt, p.Y+p.Y_s*dt
 				if p.SpeedUpdated{
-					p.SpeedUpdated = false
-					r.Send(OUTmessage{
+					m := OUTmessage{
 						Status: "move",
 						Id:     p.Id,
 						X_s:    p.X_s,
 						Y_s:    p.Y_s,
-					})
+					}
+					p.SpeedUpdated = false
+					r.Send(m)
 				}
 			}
 		case <-check_ticker.C:
@@ -233,12 +248,12 @@ func (r *Room) Handle() {
 	}
 }
 
-func home(w http.ResponseWriter, r *http.Request) {
+func home(w http.ResponseWriter, _ *http.Request) {
 	tmpl := template.Must(template.ParseFiles("./static/index.html"))
 	tmpl.Execute(w, nil)
 }
 
-func game(w http.ResponseWriter, r *http.Request) {
+func game(w http.ResponseWriter, _ *http.Request) {
 	tmpl := template.Must(template.ParseFiles("./static/game.html"))
 	tmpl.Execute(w, nil)
 }
@@ -298,14 +313,9 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 			player_room.players[pl.Id] = pl
 			player_room.Unlock()
 		}
-		for _, p := range player_room.players {
-			if p.Conn == conn {
-				message.Id = p.Id
-				break
-			}
+		if RoomMidleware(message, pl){
+			player_room.in_chan <- ToChan{message, pl}
 		}
-		//if RoomMidleware(message, pl){    //ПЕРЕПИСАТЬ ВСЕ НАХУЙ, ПЕРЕДАВАТЬ В КАНАЛ ПОЛЬЗОВАТЕЛЯ И СООБЩЕНИЕ А НЕ ТОЛЬКО СООБЩЕНИЕ
-		player_room.in_chan <- message
 		//}
 	}
 }
@@ -314,11 +324,13 @@ var r *mux.Router
 var upgrader websocket.Upgrader
 var Rooms Server
 
+
 const (
 	RectSize    = 20
 	FieldWidth  = 900
 	FieldHeight = 600
 	Fps         = 1000 / 60 //time.Millisecond
+	HitTime = 2 *time.Second
 
 )
 

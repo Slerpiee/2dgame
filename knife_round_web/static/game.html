@@ -16,20 +16,19 @@
     <a href="/">HOME</a>
 </body>
 <script>
-    let canhit = false
     let clientnow = {
         W: false,
         S: false,
         D: false,
         A: false,
-        Hit: false,
+        c: false,
     }
     let clientlate = {
         W: false,
         S: false,
         D: false,
         A: false,
-        Hit: false
+        c: false
     }
     const cube = {}
 
@@ -80,6 +79,7 @@
                             y: element.Y,
                             X_s: element.X_s,
                             Y_s: element.Y_s,
+                            Hit: false,
                             color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
                         };
                         // let p = document.createElement("p");
@@ -112,6 +112,10 @@
         for (const c in cube) {
             ctx.fillStyle = cube[c].color
             ctx.fillRect(cube[c].x, cube[c].y, 20, 20);
+            if (cube[c].Hit){
+                ctx.fillStyle = "black"
+                ctx.fillRect(cube[c].x-20, cube[c].y - 20, 60, 60)
+            }
         }
     }
 
@@ -140,15 +144,19 @@
             if (clientnow["D"]) {
                 cube[clientId].X_s = cube[clientId].X_s + 0.2
             }
-            if (clientnow.Hit){
-                message.Text = "shoot"
+            if (clientnow["c"]){
+                message.Text = "hit"
+                cube[clientId].Hit = true
+                setTimeout(()=>{
+                    cube[clientId].Hit = false
+                }, 100)
             }
             message.X_s = cube[clientId].X_s,
             message.Y_s = cube[clientId].Y_s,
 
             socket.send(JSON.stringify(message))
             clientlate = Object.assign({}, clientnow)
-            clientnow.Hit = false
+            clientnow.c = false
         }
         for (const key in cube) {
             const x_c = cube[key].x + cube[key].X_s * 16

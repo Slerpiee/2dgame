@@ -16,6 +16,8 @@
     <a href="/">HOME</a>
 </body>
 <script>
+    let lastHit
+    let isAlive = true
     let clientnow = {
         W: false,
         S: false,
@@ -31,6 +33,7 @@
         c: false
     }
     const cube = {}
+    const aliveList = {}
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
@@ -59,6 +62,8 @@
                     Room: sessionStorage.getItem("room_id")
                 }
                 socket.send(JSON.stringify(msg))
+                lastHit = Date.now()
+
                 break
             case "coords":
                 if (!(message.Id in cube)) {
@@ -69,7 +74,22 @@
                 break
             case "move":
                 [cube[message.Id].X_s, cube[message.Id].Y_s] = [message.X_s, message.Y_s];
+                if (message.Text == "hit"){
+                    cube[message.Id].Hit = true
+                    setTimeout(() => {
+                        cube[message.Id].Hit = false
+                    }, 100)
+                }
                 break
+            case "killed":
+                console.log("user", message.Id, "killed", message.Text);
+                cube[message.Text].Alive = false
+                break
+            case "alive":
+                console.log("alive", message.Id)
+                cube[message.Id].Alive = true
+                cube[message.Id].X = message.X
+                cube[message.Id].Y = message.Y
             case "room_data":
                 message.Players.forEach(element => {
                     if (!(element.Id in cube)) {
@@ -79,9 +99,11 @@
                             y: element.Y,
                             X_s: element.X_s,
                             Y_s: element.Y_s,
+                            Alive: true, 
                             Hit: false,
                             color: `rgb(${getRandomInt(255)},${getRandomInt(255)},${getRandomInt(255)})`
                         };
+                        aliveList[element.Id] = cube[element.Id]
                         // let p = document.createElement("p");
                         // p.setAttribute("player_id", element.Id)
                         // p.style.color = cube[element.Id].color
@@ -93,6 +115,7 @@
             case "playerLeft":
                 console.log("DELETE PLAYER")
                 delete cube[message.Id]
+                break
         }
     }
 
@@ -103,18 +126,21 @@
 
     socket.onerror = error => {
         console.log("Socket Error: ", error);
-        
+
     };
 
     function draw_rectangle() {
         ctx.fillStyle = "white"
         ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height)
         for (const c in cube) {
+            if (!cube[c].Alive){
+                continue
+            }
             ctx.fillStyle = cube[c].color
             ctx.fillRect(cube[c].x, cube[c].y, 20, 20);
-            if (cube[c].Hit){
+            if (cube[c].Hit) {
                 ctx.fillStyle = "black"
-                ctx.fillRect(cube[c].x-20, cube[c].y - 20, 60, 60)
+                ctx.fillRect(cube[c].x - 20, cube[c].y - 20, 60, 60)
             }
         }
     }
@@ -124,7 +150,8 @@
     }
 
     function phys() {
-        if (JSON.stringify(clientnow) != JSON.stringify(clientlate)) {
+        if (JSON.stringify(clientnow) != JSON.stringify(clientlate) && cube[clientId].Alive) {
+            
             const message = {
                 Status: "move",
                 X_s: 0,
@@ -144,12 +171,12 @@
             if (clientnow["D"]) {
                 cube[clientId].X_s = cube[clientId].X_s + 0.2
             }
-            if (clientnow["c"]){
-                message.Text = "hit"
-                cube[clientId].Hit = true
-                setTimeout(()=>{
-                    cube[clientId].Hit = false
-                }, 100)
+            if (clientnow["c"]) {
+                if (Date.now() - lastHit >= 1510) {
+                    lastHit = Date.now()
+                    console.log("Try HIT: ", cube[clientId].x-20, cube[clientId].y-20)
+                    message.Text = "hit"
+                }
             }
             message.X_s = cube[clientId].X_s,
             message.Y_s = cube[clientId].Y_s,
@@ -174,7 +201,6 @@
                 cube[key].y = y_c - y_c
             }
         }
-
         setTimeout(phys, 16)
     }
     window.addEventListener("keydown", logKey);

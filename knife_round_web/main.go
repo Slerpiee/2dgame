@@ -43,25 +43,27 @@ func (p *Server) Add(r *Room) {
 
 }
 
-type ToChan struct{
+type ToChan struct {
 	message INmessage
-	player *Player
+	player  *Player
 }
 
 type Room struct {
-	id        string
-	players   map[string]*Player
-	in_chan   chan ToChan
-	terminate chan struct{}
+	id         string
+	players    map[string]*Player
+	in_chan    chan ToChan
+	alive_chan chan *Player
+	terminate  chan struct{}
 	sync.Mutex
 }
 
-func RoomInit(id string) *Room{
+func RoomInit(id string) *Room {
 	room := &Room{
-		id: id,
-		in_chan: make(chan ToChan),
+		id:        id,
+		in_chan:   make(chan ToChan),
 		terminate: make(chan struct{}),
-		players: make(map[string]*Player),
+		alive_chan: make(chan *Player),
+		players:   make(map[string]*Player),
 	}
 	return room
 }
@@ -98,7 +100,6 @@ func (p *Players) Add(pl *Player) {
 
 func (p *Players) Delete(id string) {
 	p.Lock()
-
 	delete(p.List, id)
 	p.Unlock()
 }
@@ -112,22 +113,48 @@ func (p *Players) Full(id string) map[string]*Player {
 }
 
 type Player struct {
-	Id   string
-	Room string
-	Conn *websocket.Conn
-	Name string
-	X    float64
-	Y    float64
-	X_s  float64
-	Y_s  float64
-	Stats GameStats
+	Id           string
+	Room         *Room
+	Conn         *websocket.Conn
+	Name         string
+	X            float64
+	Y            float64
+	X_s          float64
+	Y_s          float64
+	Stats        GameStats
 	SpeedUpdated bool
+	sync.Mutex
 }
 
-type GameStats struct{
-	Hp int
+func (player *Player) CheckHit() []*Player {
+	var hitted []*Player
+	if time.Now().Sub(player.Stats.LastHit).Seconds() >= HitTime.Seconds() {
+		player.Room.Send(OUTmessage{
+			Status: "move",
+			Text:   "hit",
+			Id:     player.Id,
+		})
+		player.Stats.LastHit = time.Now()
+		HitSquareX := player.X - 20
+		HitSquareY := player.Y - 20
+		fmt.Println("Hit coords: ", HitSquareX, HitSquareY)
+		for _, user := range player.Room.players {
+			if user.Id == player.Id {
+				continue
+			}
+			//&&((HitSquareY >= user.Y && HitSquareY <= user.Y+PlayerHeigth) || (HitSquareY+HitHeigth >= user.Y && HitSquareY+HitHeigth <= user.Y+PlayerHeigth))
+			if ((user.X >= HitSquareX && user.X <= HitSquareX+HitWidth) || (user.X+PlayerWidth >= HitSquareX && user.X+PlayerWidth <= HitSquareX+HitWidth)) && ((user.Y >= HitSquareY && user.Y <= HitSquareY+HitHeigth) || (user.Y+PlayerHeigth >= HitSquareY && user.Y+PlayerHeigth <= HitSquareY+HitHeigth)) {
+				hitted = append(hitted, user)
+			}
+		}
+	}
+	return hitted
+}
+
+type GameStats struct {
+	Hp      int
 	LastHit time.Time
-	Alive bool
+	Alive   bool
 }
 
 type INmessage struct {
@@ -161,27 +188,37 @@ func (r *Room) Handle() {
 		case data := <-r.in_chan:
 			message := data.message
 			player := data.player
-			if player.Room != r.id{
+			if player.Room.id != r.id {
 				fmt.Println("invalid id, request skipped")
 				continue
 			}
 			switch message.Status {
 			case "move":
-					player.X_s, player.Y_s = message.X_s, message.Y_s
-					player.SpeedUpdated = true
-					if message.Text == "hit"{
-						if time.Now().Sub(player.Stats.LastHit).Seconds() >= HitTime.Seconds(){
-							fmt.Println("Hit yes")
-							player.Stats.LastHit = time.Now()
-						} else{
-							fmt.Println("Hit false")
-						}
-
+				player.X_s, player.Y_s = message.X_s, message.Y_s
+				player.SpeedUpdated = true
+				if message.Text == "hit" {
+					deadlist := player.CheckHit()
+					for _, user_dead := range deadlist {
+						fmt.Println("DEAD:", user_dead.Name)
+						user_dead.Stats.Alive = false
+						r.Send(OUTmessage{
+							Status: "killed",
+							Text:   user_dead.Id,
+							Id:     player.Id,
+						})
+						go func(deadp *Player){
+							<-time.After(3*time.Second)
+							r.alive_chan <- deadp
+						}(user_dead)
 					}
+				}
 			case "connected":
 				fmt.Println("User:", message.Name)
 				player_list := []OUTmessage{}
 				for _, p := range r.players {
+					if !p.Stats.Alive {
+						continue
+					}
 					player_list = append(player_list, OUTmessage{
 						Id:   p.Id,
 						Name: p.Name,
@@ -196,13 +233,23 @@ func (r *Room) Handle() {
 					Players: player_list,
 				})
 			}
+		case to_alive := <-r.alive_chan:
+			to_alive.Stats.Alive = true
+			to_alive.X = FieldWidth/2
+			to_alive.Y = FieldHeight/2
+			r.Send(OUTmessage{
+				Status: "alive",
+				Id:     to_alive.Id,
+				X: to_alive.X,
+				Y: to_alive.Y,
+			})
 		case <-speed_ticker.C:
 			time := time.Now()
 			dt := float64(time.Sub(prevTime).Milliseconds())
 			prevTime = time
 			for _, p := range r.players {
-				if !p.Stats.Alive{
-					break
+				if !p.Stats.Alive {
+					continue
 				}
 				x_c := p.X + p.X_s*dt
 				y_c := p.Y + p.Y_s*dt
@@ -218,7 +265,7 @@ func (r *Room) Handle() {
 					p.Y = y_c - y_c
 				}
 				//p.X, p.Y = p.X+p.X_s*dt, p.Y+p.Y_s*dt
-				if p.SpeedUpdated{
+				if p.SpeedUpdated {
 					m := OUTmessage{
 						Status: "move",
 						Id:     p.Id,
@@ -235,12 +282,12 @@ func (r *Room) Handle() {
 					Status: "coords",
 					Id:     p.Id,
 					X:      p.X,
-					Y:      p.Y,
-					Name:   p.Name})
+					Y:      p.Y})
 			}
 		case <-r.terminate:
 			r.players = map[string]*Player{}
 			speed_ticker.Stop()
+
 			check_ticker.Stop()
 			fmt.Println("room terminated")
 			return
@@ -258,11 +305,10 @@ func game(w http.ResponseWriter, _ *http.Request) {
 	tmpl.Execute(w, nil)
 }
 
-
-func RoomMidleware(m INmessage, pl *Player) bool{
-	switch m.Status{
+func RoomMidleware(m INmessage, pl *Player) bool {
+	switch m.Status {
 	case "move":
-		if pl.Stats.Alive && m.X_s <= 0.2 && m.X_s >= -0.2 && m.Y_s <= 0.2 && m.Y_s >= -0.2{
+		if pl.Stats.Alive && m.X_s <= 0.2 && m.X_s >= -0.2 && m.Y_s <= 0.2 && m.Y_s >= -0.2 {
 			return true
 		}
 		break
@@ -271,7 +317,6 @@ func RoomMidleware(m INmessage, pl *Player) bool{
 	}
 	return false
 }
-
 
 func serve_ws(w http.ResponseWriter, r *http.Request) {
 	var player_room *Room
@@ -282,7 +327,7 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("ERROR WHILE CONNECTING:", err)
 		return
 	}
-	pl = &Player{Id: uuid.New().String(), Room: "", Conn: conn, X: FieldWidth / 2, Y: FieldHeight / 2, Stats: GameStats{Hp: 3, LastHit: time.Now(), Alive: true}}
+	pl = &Player{Id: uuid.New().String(), Room: nil, Conn: conn, X: FieldWidth / 2, Y: FieldHeight / 2, Stats: GameStats{Hp: 3, LastHit: time.Now(), Alive: true}}
 	Users.Add(pl)
 	conn.WriteJSON(OUTmessage{Status: "id", Text: pl.Id, X: 600 / 2, Y: 600 / 2})
 
@@ -302,18 +347,18 @@ func serve_ws(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if message.Status == "connected" {
-			pl.Name = message.Name
-			pl.Room = message.Room
 			player_room = Rooms.Get(message.Room)
 			if player_room == nil {
 				conn.Close()
 				return
 			}
+			pl.Name = message.Name
+			pl.Room = player_room
 			player_room.Lock()
 			player_room.players[pl.Id] = pl
 			player_room.Unlock()
 		}
-		if RoomMidleware(message, pl){
+		if RoomMidleware(message, pl) {
 			player_room.in_chan <- ToChan{message, pl}
 		}
 		//}
@@ -324,14 +369,16 @@ var r *mux.Router
 var upgrader websocket.Upgrader
 var Rooms Server
 
-
 const (
-	RectSize    = 20
-	FieldWidth  = 900
-	FieldHeight = 600
-	Fps         = 1000 / 60 //time.Millisecond
-	HitTime = 2 *time.Second
-
+	RectSize     = 20
+	FieldWidth   = 900
+	FieldHeight  = 600
+	Fps          = 1000 / 60 //time.Millisecond
+	HitTime      = 1500 * time.Millisecond
+	PlayerWidth  = 20
+	PlayerHeigth = 20
+	HitHeigth    = 60
+	HitWidth     = 60
 )
 
 func init() {
